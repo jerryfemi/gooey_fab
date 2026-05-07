@@ -7,8 +7,8 @@ Blobs peel apart from the FAB with a **liquid gooey neck**. Tap a blob to trigge
 ## 📺 Demo
 
 <p align="center">
-  <video src="assets/demo1.webm" width="45%" muted autoplay loop playsinline></video>
-  <video src="assets/demo2.webm" width="45%" muted autoplay loop playsinline></video>
+  <img src="assets/demo1.webm" width="45%" />
+  <img src="assets/demo2.webm" width="45%" />
 </p>
 
 ---
