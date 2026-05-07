@@ -1,6 +1,7 @@
 import 'package:device_preview/device_preview.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:gooey_fab/gooey_fab.dart';
 
 void main() {
@@ -44,28 +45,30 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GooeyFabScaffold(
-      fabColor: Colors.indigo,
-      blobEffect: BlobEffect.stack,
+      fabColor: Colors.cyanAccent,
+      fabIconColor: Colors.black,
+      blobEffect: BlobEffect.arc,
       gooiness: 40,
+      initialPosition: const Offset(16, 16),
       appBar: AppBar(
         title: const Text('GooeyFab'),
-        backgroundColor: Colors.indigo.withValues(alpha: 0.2),
-        elevation: 0,
+        backgroundColor: Colors.white.withValues(alpha: 0.05),
+        elevation: 2,
       ),
       items: [
         // ── 1. Bottom sheet ─────────────────────────────────────────────
-        // GooeyFabItem(
-        //   icon: Icons.layers_rounded,
-        //   label: 'Open sheet',
-        //   onTap: (ctx) => GooeyTransitions.showSheet(
-        //     ctx,
-        //     builder: (_) => const _ExampleSheet(),
-        //   ),
-        // ),
+        GooeyFabItem(
+          icon: CupertinoIcons.square_stack_3d_down_right_fill,
+          label: 'Open sheet',
+          onTap: (ctx) => GooeyTransitions.showSheet(
+            ctx,
+            builder: (_) => const _ExampleSheet(),
+          ),
+        ),
 
         // ── 2. Modal dialog ─────────────────────────────────────────────
         GooeyFabItem(
-          icon: Icons.notifications_rounded,
+          icon: CupertinoIcons.bell_circle_fill,
           label: 'Open modal',
           onTap: (ctx) => GooeyTransitions.showModal(
             ctx,
@@ -75,7 +78,8 @@ class HomeScreen extends StatelessWidget {
 
         // ── 3. Full-screen ink flood ─────────────────────────────────────
         GooeyFabItem(
-          icon: Icons.open_in_full_rounded,
+          icon: CupertinoIcons.viewfinder,
+          iconColor: Colors.black,
           label: 'Open screen',
           onTap: (ctx) => GooeyTransitions.showScreen(
             ctx,

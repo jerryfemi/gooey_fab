@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:gooey/gooey.dart';
 
@@ -145,11 +146,11 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
     // the same GooeyZone as the FAB, the shader draws a liquid neck.
     _morphSheetCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 650),
+      duration: const Duration(milliseconds: 500),
     );
     _morphSheetAnim = CurvedAnimation(
       parent: _morphSheetCtrl,
-      curve: Curves.easeInCubic,
+      curve: Curves.easeOutCubic,
     );
     _morphSheetCtrl.addStatusListener((s) {
       if (s == AnimationStatus.completed) {
@@ -454,8 +455,13 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
                 final t = _menuAnim.value;
                 // When menu is closed, remove sub-blobs entirely so only
                 // the main FAB renders in the GooeyZone → clean, normal size.
-                // Without this, overlapping blobs make the FAB look inflated.
                 if (t == 0 && !_menuOpen) return const SizedBox.shrink();
+
+                final iconColor = item.iconColor ??
+                    (ThemeData.estimateBrightnessForColor(blobColor) == Brightness.light
+                        ? Colors.black.withValues(alpha: 0.8)
+                        : Colors.white.withValues(alpha: 0.9));
+
                 double dx = 0;
                 double dy = 0;
 
@@ -493,8 +499,8 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
                           child: Center(
                             child: Icon(
                               item.icon,
-                              color: Colors.black.withValues(alpha: 0.8),
-                              size: sr * 0.7,
+                              color: iconColor,
+                              size: sr * 0.8,
                             ),
                           ),
                         ),
@@ -531,9 +537,9 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
                         turns: _menuOpen ? 0.125 : 0,
                         child: Icon(
                           // Single item: show its icon directly on FAB
-                          count == 1 ? widget.items.first.icon : Icons.add,
+                          count == 1 ? widget.items.first.icon : CupertinoIcons.add,
                           color: widget.iconColor,
-                          size: r * 0.82,
+                          size: r * 0.9,
                         ),
                       ),
                     ),

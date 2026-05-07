@@ -146,9 +146,9 @@ class _GooeySheetRoute<T> extends PageRoute<T> {
   @override
   bool get maintainState => true;
   @override
-  Duration get transitionDuration => const Duration(milliseconds: 850);
+  Duration get transitionDuration => const Duration(milliseconds: 700);
   @override
-  Duration get reverseTransitionDuration => const Duration(milliseconds: 420);
+  Duration get reverseTransitionDuration => const Duration(milliseconds: 380);
 
   @override
   Widget buildPage(
@@ -182,19 +182,19 @@ class _GooeySheetTransition extends StatelessWidget {
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
 
-    // Sheet slides up — delayed until the morph blob (650ms in GooeyFab)
-    // has had time to peel off and travel ~70% of the way down.
-    // At 0.45 * 850ms = 383ms, which is ~460ms after tap (80ms delay + 383ms),
-    // the blob is at 460/650 = ~71% done. Sheet rises as blob arrives.
+    // Sheet slides up — delayed just enough for the morph blob (500ms in
+    // GooeyFab) to peel off and begin traveling. At 0.28 * 700ms = 196ms,
+    // which is ~276ms after tap. The blob is ~55% traveled → sheet rises
+    // as blob arrives at the bottom edge.
     final sheetAnim = CurvedAnimation(
       parent: animation,
-      curve: const Interval(0.45, 1.0, curve: Curves.easeOutQuart),
+      curve: const Interval(0.28, 1.0, curve: Curves.easeOutCubic),
     );
 
     // Content fade: visible once sheet is mostly risen
     final contentAnim = CurvedAnimation(
       parent: animation,
-      curve: const Interval(0.70, 1.0, curve: Curves.easeIn),
+      curve: const Interval(0.60, 1.0, curve: Curves.easeIn),
     );
 
     return Material(
@@ -204,7 +204,7 @@ class _GooeySheetTransition extends StatelessWidget {
           // ── Sheet rising from bottom ───────────────────────────────────
           AnimatedBuilder(
             animation: sheetAnim,
-            builder: (_, __) {
+            builder: (_, _) {
               final maxH = size.height * heightFactor;
               final currentH = lerpDouble(0, maxH, sheetAnim.value)!;
               if (currentH <= 0) return const SizedBox.shrink();
