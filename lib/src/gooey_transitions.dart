@@ -12,7 +12,7 @@ import 'package:gooey/gooey.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 Offset _fabScreenPosition = const Offset(24, 24);
-double _fabRadius = 30;
+double _fabRadius = 28;
 Color _fabColor = Colors.cyanAccent;
 
 /// Called by [GooeyFab] every time it rebuilds. Internal use only.

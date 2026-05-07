@@ -59,3 +59,4 @@ export 'src/gooey_fab_item.dart';
 export 'src/gooey_fab_scaffold.dart';
 export 'src/gooey_fab_widget.dart';
 export 'src/gooey_transitions.dart' hide registerFabState;
+export 'src/blob_effect.dart';

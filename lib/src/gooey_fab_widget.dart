@@ -1,6 +1,10 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:gooey/gooey.dart';
+
+import 'blob_effect.dart';
 
 import 'gooey_controller.dart';
 import 'gooey_fab_item.dart';
@@ -38,10 +42,10 @@ class GooeyFab extends StatefulWidget {
   /// The gooey blob color. Defaults to [Colors.cyanAccent].
   final Color color;
 
-  /// FAB circle radius. Defaults to 30 (60px diameter).
+  /// FAB circle radius. Defaults to 28 (56px diameter).
   final double radius;
 
-  /// Sub-blob radius. Defaults to 24 (48px diameter).
+  /// Sub-blob radius. Defaults to 22 (44px diameter).
   final double subRadius;
 
   /// How strongly nearby blobs merge. Higher = longer liquid neck.
@@ -53,15 +57,19 @@ class GooeyFab extends StatefulWidget {
   /// Optional controller for programmatic open/close.
   final GooeyFabController? controller;
 
+  /// The blob effect. Defaults to [BlobEffect.arc].
+  final BlobEffect blobEffect;
+
   const GooeyFab({
     super.key,
     required this.items,
     this.color = Colors.cyanAccent,
-    this.radius = 30,
-    this.subRadius = 24,
+    this.radius = 28,
+    this.subRadius = 22,
     this.gooiness = 80,
     this.initialPosition = const Offset(24, 32),
     this.controller,
+    this.blobEffect = BlobEffect.arc,
   }) : assert(
          items.length >= 1 && items.length <= 5,
          'GooeyFab supports 1–5 items',
@@ -219,15 +227,32 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     _registerPosition();
     final size = MediaQuery.of(context).size;
+    final padding = MediaQuery.of(context).padding;
     final r = widget.radius;
     final sr = widget.subRadius;
     final color = widget.color;
     final count = widget.items.length;
 
-    // Pre-compute spread directions for up to 5 blobs.
-    // Blobs fan out in an arc above/beside the FAB.
-    // For 1 item this is never called (direct tap path above).
-    final directions = _spreadDirections(count);
+    final fabCenter = Offset(
+      size.width - _pos.dx - r,
+      size.height - _pos.dy - r,
+    );
+    const maxSpread = _arcSpread;
+    final safeMargin = r + sr + maxSpread + 8;
+    final region = _resolveRegion(
+      center: fabCenter,
+      size: size,
+      padding: padding,
+      safeMargin: safeMargin,
+    );
+
+    final spreadScale = _spreadScaleForCount(count);
+    final arcDirections = widget.blobEffect == BlobEffect.arc
+      ? _arcDirections(count, _centerAngleForRegion(region))
+      : const <Offset>[];
+
+    final stackUp = _stackOpensUp(region);
+    final stackDxDir = _stackDxDirection(region);
 
     return GooeyZone(
       color: color,
@@ -240,17 +265,28 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
           ...List.generate(count, (i) {
             final item = widget.items[i];
             final blobColor = item.color ?? color;
-            final dir = directions[i];
-
             return AnimatedBuilder(
               animation: _menuAnim,
               builder: (_, _) {
                 final t = _menuAnim.value;
                 // At t=0: blob sits exactly on FAB → fully merged (one blob)
                 // At t=1: blob is spread + gooey neck fully stretched
-                const spread = 92.0;
-                final dx = dir.dx * spread * t;
-                final dy = dir.dy * spread * t;
+                double dx = 0;
+                double dy = 0;
+
+                switch (widget.blobEffect) {
+                  case BlobEffect.arc:
+                    final dir = arcDirections[i];
+                    final spread = _arcSpread * spreadScale;
+                    dx = dir.dx * spread * t;
+                    dy = dir.dy * spread * t;
+                    break;
+                  case BlobEffect.stack:
+                    dx = _stackDxBias * stackDxDir * t;
+                    dy =
+                        (i + 1) * _stackSpread * spreadScale * t * (stackUp ? 1 : -1);
+                    break;
+                }
 
                 return Positioned(
                   right: _pos.dx - dx,
@@ -272,7 +308,7 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
                             child: Icon(
                               item.icon,
                               color: Colors.black.withValues(alpha: 0.8),
-                              size: sr * 0.75,
+                              size: sr * 0.7,
                             ),
                           ),
                         ),
@@ -311,7 +347,7 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
                           // Single item: show its icon directly on FAB
                           count == 1 ? widget.items.first.icon : Icons.add,
                           color: Colors.black,
-                          size: r * 0.85,
+                          size: r * 0.75,
                         ),
                       ),
                     ),
@@ -326,43 +362,134 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
   }
 }
 
-/// Returns unit direction vectors for N sub-blobs arranged in a
-/// natural arc. Blobs always spread upward with slight horizontal spread,
-/// mirroring which side of the screen the FAB is on.
-List<Offset> _spreadDirections(int count) {
-  // Angles in degrees: 90° = straight up, fans left/right from there
-  // Designed so blobs never spread off-screen.
-  const arcTable = {
-    1: [90.0],
-    2: [112.0, 68.0],
-    3: [135.0, 90.0, 45.0],
-    4: [135.0, 105.0, 75.0, 45.0],
-    5: [150.0, 120.0, 90.0, 60.0, 30.0],
-  };
-  final angles = arcTable[count]!;
-  return angles.map((deg) {
-    final rad = deg * 3.14159265 / 180;
-    // dx is negative because Positioned.right means we subtract to go left
-    return Offset(-1 * -1 * _cos(rad), _sin(rad));
+const double _arcSpread = 92.0;
+const double _stackSpread = 80.0;
+const double _stackDxBias = 0.0;
+
+enum _FabRegion {
+  center,
+  left,
+  right,
+  top,
+  bottom,
+  topLeft,
+  topRight,
+  bottomLeft,
+  bottomRight,
+}
+
+_FabRegion _resolveRegion({
+  required Offset center,
+  required Size size,
+  required EdgeInsets padding,
+  required double safeMargin,
+}) {
+  final leftLimit = safeMargin + padding.left;
+  final rightLimit = size.width - safeMargin - padding.right;
+  final topLimit = safeMargin + padding.top;
+  final bottomLimit = size.height - safeMargin - padding.bottom;
+
+  final nearLeft = center.dx < leftLimit;
+  final nearRight = center.dx > rightLimit;
+  final nearTop = center.dy < topLimit;
+  final nearBottom = center.dy > bottomLimit;
+
+  if (nearLeft && nearTop) return _FabRegion.topLeft;
+  if (nearRight && nearTop) return _FabRegion.topRight;
+  if (nearLeft && nearBottom) return _FabRegion.bottomLeft;
+  if (nearRight && nearBottom) return _FabRegion.bottomRight;
+  if (nearLeft) return _FabRegion.left;
+  if (nearRight) return _FabRegion.right;
+  if (nearTop) return _FabRegion.top;
+  if (nearBottom) return _FabRegion.bottom;
+  return _FabRegion.center;
+}
+
+double _centerAngleForRegion(_FabRegion region) {
+  switch (region) {
+    case _FabRegion.left:
+      return 0.0; // fan right
+    case _FabRegion.right:
+      return 180.0; // fan left
+    case _FabRegion.top:
+      return 270.0; // fan down
+    case _FabRegion.bottom:
+      return 90.0; // fan up
+    case _FabRegion.topLeft:
+      return 315.0; // down-right
+    case _FabRegion.topRight:
+      return 225.0; // down-left
+    case _FabRegion.bottomLeft:
+      return 45.0; // up-right
+    case _FabRegion.bottomRight:
+      return 135.0; // up-left
+    case _FabRegion.center:
+      return 90.0; // up
+  }
+}
+
+List<double> _fanOffsetsForCount(int count) {
+  switch (count) {
+    case 1:
+      return const [0.0];
+    case 2:
+      return const [-25.0, 25.0];
+    case 3:
+      return const [-45.0, 0.0, 45.0];
+    case 4:
+      return const [-60.0, -20.0, 20.0, 60.0];
+    case 5:
+      return const [-80.0, -40.0, 0.0, 40.0, 80.0];
+  }
+  return const [0.0];
+}
+
+double _spreadScaleForCount(int count) {
+  switch (count) {
+    case 1:
+    case 2:
+      return 1.0;
+    case 3:
+      return 0.95;
+    case 4:
+      return 0.90;
+    case 5:
+      return 0.85;
+  }
+  return 1.0;
+}
+
+List<Offset> _arcDirections(int count, double centerAngleDeg) {
+  final offsets = _fanOffsetsForCount(count);
+  return offsets.map((offsetDeg) {
+    final deg = centerAngleDeg + offsetDeg;
+    final rad = deg * math.pi / 180.0;
+    return Offset(math.cos(rad), math.sin(rad));
   }).toList();
 }
 
-double _cos(double rad) {
-  // Simple cos via sin identity
-  return _sin(3.14159265 / 2 - rad);
+bool _stackOpensUp(_FabRegion region) {
+  switch (region) {
+    case _FabRegion.top:
+    case _FabRegion.topLeft:
+    case _FabRegion.topRight:
+      return false;
+    default:
+      return true;
+  }
 }
 
-double _sin(double rad) {
-  // Taylor series (accurate enough for our angles)
-  double x = rad;
-  while (x > 3.14159265) {
-    x -= 2 * 3.14159265;
+double _stackDxDirection(_FabRegion region) {
+  switch (region) {
+    case _FabRegion.left:
+    case _FabRegion.topLeft:
+    case _FabRegion.bottomLeft:
+      return 1.0;
+    case _FabRegion.right:
+    case _FabRegion.topRight:
+    case _FabRegion.bottomRight:
+      return -1.0;
+    default:
+      return 0.0;
   }
-  while (x < -3.14159265) {
-    x += 2 * 3.14159265;
-  }
-  return x -
-      (x * x * x) / 6 +
-      (x * x * x * x * x) / 120 -
-      (x * x * x * x * x * x * x) / 5040;
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gooey_fab/gooey_fab.dart';
 
 import 'gooey_controller.dart';
 import 'gooey_fab_item.dart';
@@ -45,6 +46,7 @@ class GooeyFabScaffold extends StatelessWidget {
   final double gooiness;
   final Offset initialPosition;
   final GooeyFabController? controller;
+  final BlobEffect blobEffect;
 
   const GooeyFabScaffold({
     super.key,
@@ -54,11 +56,12 @@ class GooeyFabScaffold extends StatelessWidget {
     this.bottomNavigationBar,
     this.drawer,
     this.fabColor = Colors.cyanAccent,
-    this.fabRadius = 30,
-    this.subRadius = 24,
+    this.fabRadius = 28,
+    this.subRadius = 22,
     this.gooiness = 80,
     this.initialPosition = const Offset(24, 32),
     this.controller,
+    this.blobEffect = BlobEffect.arc,
   });
 
   @override
@@ -80,6 +83,7 @@ class GooeyFabScaffold extends StatelessWidget {
             gooiness: gooiness,
             initialPosition: initialPosition,
             controller: controller,
+            blobEffect: blobEffect,
           ),
         ],
       ),
