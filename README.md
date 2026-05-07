@@ -1,35 +1,59 @@
-# gooey_fab
+# Gooey FAB 💧
 
-A draggable, morphing floating action button for Flutter.
+A draggable, morphing floating action button for Flutter that feels alive.
 
 Blobs peel apart from the FAB with a **liquid gooey neck**. Tap a blob to trigger one of three morph transitions — each one feels like the blob *becomes* the UI it opens.
 
+## 📺 Demo
+
+<p align="center">
+  <video src="https://github.com/jerryfemi/gooey_fab/raw/main/assets/demo1.webm" width="350" muted autoplay loop></video>
+  <video src="https://github.com/jerryfemi/gooey_fab/raw/main/assets/demo2.webm" width="350" muted autoplay loop></video>
+</p>
+
 ---
 
-## Transitions
+## ✨ Features
 
-| Transition | Feel | Use for |
+- 💧 **Liquid Metaballs**: High-performance shader-based gooey effects.
+- 🖐️ **Magnetic Dragging**: Draggable FAB that snaps to screen edges with elastic physics.
+- 🎭 **Morph Transitions**: Three unique transition types that bridge the gap between button and content.
+- 🎨 **Fully Customizable**: Control gooiness, radii, colors, and spreading effects.
+- 📱 **Cupertino & Material**: Works beautifully with any icon set.
+
+---
+
+## 🎭 Transitions
+
+| Transition | Visual Feel | Best For |
 |---|---|---|
-| `showSheet` | Blob squashes → elongates (sweat-drop) → dives into the bottom edge as the sheet rises | Menus, options, quick actions |
-| `showModal` | Blob races to center, blooms, implodes → dialog springs open elastically | Confirmations, alerts, mini forms |
-| `showScreen` | Blob expands as a circle from its exact position, flooding the screen with color | New routes, detail screens, onboarding |
+| `showSheet` | Blob squashes → elongates (sweat-drop) → dives into bottom edge. | Menus, quick options, filter sheets |
+| `showModal` | Blob races to center, blooms, implodes → dialog springs open. | Alerts, confirmations, mini-forms |
+| `showScreen` | Blob expands as a circle, flooding the screen with ink. | Detail screens, new routes, onboarding |
 
 ---
 
-## Installation
+## 🚀 Installation
+
+### From GitHub (Current)
+Add this to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  gooey_fab: ^0.1.0
+  gooey_fab:
+    git:
+      url: https://github.com/jerryfemi/gooey_fab.git
 ```
+
+
 
 ---
 
 ## Usage
 
-### GooeyFabScaffold (easiest)
+### 1. GooeyFabScaffold (Easiest)
 
-Wraps a `Scaffold` and places the FAB automatically.
+The quickest way to get started. It wraps a standard `Scaffold` and handles the FAB stacking for you.
 
 ```dart
 GooeyFabScaffold(
@@ -37,16 +61,16 @@ GooeyFabScaffold(
   body: MyScreen(),
   items: [
     GooeyFabItem(
-      icon: Icons.layers_rounded,
-      label: 'Options',
+      icon: CupertinoIcons.layers_fill,
+      label: 'Menu',
       onTap: (ctx) => GooeyTransitions.showSheet(
         ctx,
-        builder: (_) => MyOptionsSheet(),
+        builder: (_) => MySheet(),
       ),
     ),
     GooeyFabItem(
-      icon: Icons.info_rounded,
-      label: 'About',
+      icon: CupertinoIcons.bell_fill,
+      label: 'Alert',
       onTap: (ctx) => GooeyTransitions.showModal(
         ctx,
         builder: (_) => MyAboutDialog(),
@@ -102,9 +126,9 @@ GooeyFab(
 ```dart
 final _controller = GooeyFabController();
 
-GooeyFab(
+    GooeyFab(
   controller: _controller,
-  items: [...],
+      items: [...],
 )
 
 // Elsewhere in your code:
@@ -182,6 +206,21 @@ the stretching liquid neck between them automatically.
 
 ---
 
-## License
+## 🎨 Customization
 
-MIT
+| Property | Default | Description |
+|---|---|---|
+| `gooiness` | `80` | How "sticky" the liquid is. Higher = longer necks. |
+| `radius` | `28` | Main FAB radius (56px diameter). |
+| `subRadius` | `22` | Radius of the menu item blobs. |
+| `blobEffect` | `arc` | Choose between `arc` (fan out) or `stack` (vertical list). |
+
+---
+
+## 📝 Performance Tips
+
+The liquid effect uses a **GPU shader** via the `gooey` package.
+- Avoid nesting multiple `GooeyZone` widgets.
+- Keep the number of sub-blobs to 5 or fewer for the best "stretchy" feel.
+
+

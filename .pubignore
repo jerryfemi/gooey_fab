@@ -1,0 +1,6 @@
+# Ignore assets (videos/screenshots) when publishing to pub.dev
+assets/
+screenshots/
+example/build/
+.DS_Store
+*.log
