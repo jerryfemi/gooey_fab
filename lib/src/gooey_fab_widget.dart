@@ -75,7 +75,7 @@ class GooeyFab extends StatefulWidget {
     this.iconColor = Colors.black,
     this.radius = 28,
     this.subRadius = 22,
-    this.gooiness = 65,
+    this.gooiness = 80,
     this.initialPosition = const Offset(24, 32),
     this.controller,
     this.blobEffect = BlobEffect.arc,
@@ -452,8 +452,10 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
               animation: _menuAnim,
               builder: (_, _) {
                 final t = _menuAnim.value;
-                // At t=0: blob sits exactly on FAB → fully merged (one blob)
-                // At t=1: blob is spread + gooey neck fully stretched
+                // When menu is closed, remove sub-blobs entirely so only
+                // the main FAB renders in the GooeyZone → clean, normal size.
+                // Without this, overlapping blobs make the FAB look inflated.
+                if (t == 0 && !_menuOpen) return const SizedBox.shrink();
                 double dx = 0;
                 double dy = 0;
 

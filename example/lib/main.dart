@@ -45,7 +45,7 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return GooeyFabScaffold(
       fabColor: Colors.indigo,
-      blobEffect: BlobEffect.arc,
+      blobEffect: BlobEffect.stack,
       gooiness: 40,
       appBar: AppBar(
         title: const Text('GooeyFab'),
@@ -54,14 +54,14 @@ class HomeScreen extends StatelessWidget {
       ),
       items: [
         // ── 1. Bottom sheet ─────────────────────────────────────────────
-        GooeyFabItem(
-          icon: Icons.layers_rounded,
-          label: 'Open sheet',
-          onTap: (ctx) => GooeyTransitions.showSheet(
-            ctx,
-            builder: (_) => const _ExampleSheet(),
-          ),
-        ),
+        // GooeyFabItem(
+        //   icon: Icons.layers_rounded,
+        //   label: 'Open sheet',
+        //   onTap: (ctx) => GooeyTransitions.showSheet(
+        //     ctx,
+        //     builder: (_) => const _ExampleSheet(),
+        //   ),
+        // ),
 
         // ── 2. Modal dialog ─────────────────────────────────────────────
         GooeyFabItem(

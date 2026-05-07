@@ -64,7 +64,7 @@ class GooeyFabScaffold extends StatelessWidget {
     this.fabIconColor = Colors.black,
     this.fabRadius = 28,
     this.subRadius = 22,
-    this.gooiness = 65,
+    this.gooiness = 80,
     this.initialPosition = const Offset(24, 32),
     this.controller,
     this.blobEffect = BlobEffect.arc,
