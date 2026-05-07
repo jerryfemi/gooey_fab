@@ -52,7 +52,8 @@
 ///   ],
 /// )
 /// ```
-library gooey_fab;
+library;
+
 
 export 'src/gooey_controller.dart';
 export 'src/gooey_fab_item.dart';
