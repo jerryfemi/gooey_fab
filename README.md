@@ -6,9 +6,10 @@ Blobs peel apart from the FAB with a **liquid gooey neck**. Tap a blob to trigge
 
 ## 📺 Demo
 
-![Demo - Interaction](https://github.com/jerryfemi/gooey_fab/raw/main/assets/demo1.webm)
-
-![Demo - Transitions](https://github.com/jerryfemi/gooey_fab/raw/main/assets/demo2.webm)
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/c7932500-069d-444e-b40f-469e8ebc231f" width="48%" muted autoplay loop playsinline></video>
+  <video src="https://github.com/user-attachments/assets/19f7026e-08ce-4cc5-83d2-0c655935fd64" width="48%" muted autoplay loop playsinline></video>
+</p>
 
 ---
 
