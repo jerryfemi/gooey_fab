@@ -224,3 +224,9 @@ The liquid effect uses a **GPU shader** via the `gooey` package.
 - Keep the number of sub-blobs to 5 or fewer for the best "stretchy" feel.
 
 
+
+---
+
+##  Credits
+
+Special thanks to **[Milad Akarie](https://github.com/milad-akarie)** for the original [gooey](https://pub.dev/packages/gooey) package which powers the liquid shader effects in this library.
