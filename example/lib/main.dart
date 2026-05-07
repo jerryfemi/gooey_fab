@@ -45,8 +45,7 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return GooeyFabScaffold(
       fabColor: Colors.indigo,
-      fabRadius: 28,
-      blobEffect: BlobEffect.stack,
+      blobEffect: BlobEffect.arc,
       gooiness: 40,
       appBar: AppBar(
         title: const Text('GooeyFab'),

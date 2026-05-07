@@ -33,10 +33,15 @@ class GooeyFabItem {
   /// Defaults to the FAB's [GooeyFab.color].
   final Color? color;
 
+  /// Override the icon color for this specific item.
+  /// Defaults to a contrast color based on the blob color.
+  final Color? iconColor;
+
   const GooeyFabItem({
     required this.icon,
     required this.label,
     required this.onTap,
     this.color,
+    this.iconColor,
   });
 }

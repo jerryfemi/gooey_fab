@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:gooey_fab/gooey_fab.dart';
 
+import 'blob_effect.dart';
 import 'gooey_controller.dart';
 import 'gooey_fab_item.dart';
 import 'gooey_fab_widget.dart';
@@ -41,12 +41,17 @@ class GooeyFabScaffold extends StatelessWidget {
 
   /// Forwarded to [GooeyFab].
   final Color fabColor;
+  final Color fabIconColor;
   final double fabRadius;
   final double subRadius;
   final double gooiness;
   final Offset initialPosition;
   final GooeyFabController? controller;
   final BlobEffect blobEffect;
+
+  /// Called when the user drags the FAB to a new position.
+  /// Use this to persist the position yourself (SharedPreferences, Hive, etc.).
+  final void Function(Offset position)? onPositionChanged;
 
   const GooeyFabScaffold({
     super.key,
@@ -56,12 +61,14 @@ class GooeyFabScaffold extends StatelessWidget {
     this.bottomNavigationBar,
     this.drawer,
     this.fabColor = Colors.cyanAccent,
+    this.fabIconColor = Colors.black,
     this.fabRadius = 28,
     this.subRadius = 22,
-    this.gooiness = 80,
+    this.gooiness = 65,
     this.initialPosition = const Offset(24, 32),
     this.controller,
     this.blobEffect = BlobEffect.arc,
+    this.onPositionChanged,
   });
 
   @override
@@ -78,12 +85,14 @@ class GooeyFabScaffold extends StatelessWidget {
           GooeyFab(
             items: items,
             color: fabColor,
+            iconColor: fabIconColor,
             radius: fabRadius,
             subRadius: subRadius,
             gooiness: gooiness,
             initialPosition: initialPosition,
             controller: controller,
             blobEffect: blobEffect,
+            onPositionChanged: onPositionChanged,
           ),
         ],
       ),

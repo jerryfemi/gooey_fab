@@ -1,29 +1,37 @@
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
-import 'package:gooey/gooey.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal registry
 //
-// GooeyFab registers its current screen position here so the transition
-// helpers know exactly where to start the morph animation from —
-// regardless of where the user has dragged the FAB.
+// GooeyFab registers its current screen position AND morph callbacks here
+// so the transition helpers know exactly where to start the morph animation
+// from — regardless of where the user has dragged the FAB.
 // ─────────────────────────────────────────────────────────────────────────────
 
 Offset _fabScreenPosition = const Offset(24, 24);
 double _fabRadius = 28;
 Color _fabColor = Colors.cyanAccent;
 
+// Morph callbacks — called by showSheet / showModal to trigger the blob
+// animation inside GooeyFab's GooeyZone (same shader = gooey neck).
+VoidCallback? _triggerSheetMorph;
+VoidCallback? _triggerModalMorph;
+
 /// Called by [GooeyFab] every time it rebuilds. Internal use only.
 void registerFabState({
   required Offset screenPosition,
   required double radius,
   required Color color,
+  VoidCallback? onSheetMorph,
+  VoidCallback? onModalMorph,
 }) {
   _fabScreenPosition = screenPosition;
   _fabRadius = radius;
   _fabColor = color;
+  _triggerSheetMorph = onSheetMorph;
+  _triggerModalMorph = onModalMorph;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -40,9 +48,9 @@ abstract class GooeyTransitions {
 
   // ── 1. Bottom sheet ────────────────────────────────────────────────────────
   //
-  // Blob squashes wide → elongates tall (sweat-drop) → dives into the
-  // bottom edge. The sheet rises from that exact point while the blob is
-  // still visible, so the two motions overlap seamlessly.
+  // The morph blob is rendered inside GooeyFab's GooeyZone (shared shader),
+  // so it gets the stretchy gooey neck when peeling away. This route only
+  // handles the sheet itself rising from the bottom.
 
   static Future<T?> showSheet<T>(
     BuildContext context, {
@@ -51,12 +59,13 @@ abstract class GooeyTransitions {
     double heightFactor = 0.50,
     Color backgroundColor = const Color(0xFF181818),
   }) {
+    // Trigger morph blob inside GooeyFab's GooeyZone
+    _triggerSheetMorph?.call();
+
     final effectiveColor = color ?? _fabColor;
     return Navigator.of(context).push<T>(
       _GooeySheetRoute<T>(
         builder: builder,
-        fabPosition: _fabScreenPosition,
-        fabRadius: _fabRadius,
         color: effectiveColor,
         heightFactor: heightFactor,
         backgroundColor: backgroundColor,
@@ -66,20 +75,21 @@ abstract class GooeyTransitions {
 
   // ── 2. Modal ───────────────────────────────────────────────────────────────
   //
-  // Blob races to screen center, blooms outward, then implodes to zero.
-  // Dialog springs open with elastic bounce at the exact moment blob = 0.
+  // Morph blob (peel to center, bloom, implode) is rendered inside GooeyFab's
+  // GooeyZone. This route only shows the dialog springing in with elastic.
 
   static Future<T?> showModal<T>(
     BuildContext context, {
     required WidgetBuilder builder,
     Color? color,
   }) {
+    // Trigger morph blob inside GooeyFab's GooeyZone
+    _triggerModalMorph?.call();
+
     final effectiveColor = color ?? _fabColor;
     return Navigator.of(context).push<T>(
       _GooeyModalRoute<T>(
         builder: builder,
-        fabPosition: _fabScreenPosition,
-        fabRadius: _fabRadius,
         color: effectiveColor,
       ),
     );
@@ -109,21 +119,17 @@ abstract class GooeyTransitions {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ROUTE 1 — Gooey Bottom Sheet
+// ROUTE 1 — Gooey Bottom Sheet (NO blob — blob is in GooeyFab's GooeyZone)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _GooeySheetRoute<T> extends PageRoute<T> {
   final WidgetBuilder builder;
-  final Offset fabPosition;
-  final double fabRadius;
   final Color color;
   final double heightFactor;
   final Color backgroundColor;
 
   _GooeySheetRoute({
     required this.builder,
-    required this.fabPosition,
-    required this.fabRadius,
     required this.color,
     required this.heightFactor,
     required this.backgroundColor,
@@ -134,11 +140,13 @@ class _GooeySheetRoute<T> extends PageRoute<T> {
   @override
   String? get barrierLabel => 'Sheet';
   @override
+  bool get barrierDismissible => true;
+  @override
   bool get opaque => false;
   @override
   bool get maintainState => true;
   @override
-  Duration get transitionDuration => const Duration(milliseconds: 700);
+  Duration get transitionDuration => const Duration(milliseconds: 850);
   @override
   Duration get reverseTransitionDuration => const Duration(milliseconds: 420);
 
@@ -150,9 +158,6 @@ class _GooeySheetRoute<T> extends PageRoute<T> {
   ) {
     return _GooeySheetTransition(
       animation: animation,
-      fabPosition: fabPosition,
-      fabRadius: fabRadius,
-      color: color,
       heightFactor: heightFactor,
       backgroundColor: backgroundColor,
       child: builder(context),
@@ -162,18 +167,12 @@ class _GooeySheetRoute<T> extends PageRoute<T> {
 
 class _GooeySheetTransition extends StatelessWidget {
   final Animation<double> animation;
-  final Offset fabPosition;
-  final double fabRadius;
-  final Color color;
   final double heightFactor;
   final Color backgroundColor;
   final Widget child;
 
   const _GooeySheetTransition({
     required this.animation,
-    required this.fabPosition,
-    required this.fabRadius,
-    required this.color,
     required this.heightFactor,
     required this.backgroundColor,
     required this.child,
@@ -183,91 +182,25 @@ class _GooeySheetTransition extends StatelessWidget {
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
 
-    // Blob animation: 0 → 0.65
-    final blobAnim = CurvedAnimation(
-      parent: animation,
-      curve: const Interval(0.0, 0.65, curve: Curves.easeInCubic),
-    );
-
-    // Sheet animation: 0.50 → 1.0 (overlaps blob by 15%)
+    // Sheet slides up — delayed until the morph blob (650ms in GooeyFab)
+    // has had time to peel off and travel ~70% of the way down.
+    // At 0.45 * 850ms = 383ms, which is ~460ms after tap (80ms delay + 383ms),
+    // the blob is at 460/650 = ~71% done. Sheet rises as blob arrives.
     final sheetAnim = CurvedAnimation(
       parent: animation,
-      curve: const Interval(0.50, 1.0, curve: Curves.easeOutQuart),
+      curve: const Interval(0.45, 1.0, curve: Curves.easeOutQuart),
     );
 
-    // Content fade: 0.72 → 1.0
+    // Content fade: visible once sheet is mostly risen
     final contentAnim = CurvedAnimation(
       parent: animation,
-      curve: const Interval(0.72, 1.0, curve: Curves.easeIn),
+      curve: const Interval(0.70, 1.0, curve: Curves.easeIn),
     );
 
     return Material(
+      type: MaterialType.transparency,
       child: Stack(
         children: [
-          // ── Sweat-drop morph blob ──────────────────────────────────────
-          // Starts at FAB position, travels to bottom-center,
-          // morphing through 3 shape phases along the way.
-          AnimatedBuilder(
-            animation: blobAnim,
-            builder: (_, _) {
-              final t = blobAnim.value;
-              if (t == 0) return const SizedBox.shrink();
-      
-              // Position: FAB screen pos → bottom-center
-              final startX = fabPosition.dx;
-              final startY = fabPosition.dy;
-              final endX = size.width / 2;
-              final endY = size.height + fabRadius; // off screen bottom
-      
-              final cx = lerpDouble(startX, endX, t)!;
-              final cy = lerpDouble(startY, endY, t)!;
-      
-              // 3-phase shape morph
-              double sx, sy;
-              if (t < 0.30) {
-                // Phase 1: squash wide
-                final p = t / 0.30;
-                sx = lerpDouble(1.0, 1.5, p)!;
-                sy = lerpDouble(1.0, 0.60, p)!;
-              } else if (t < 0.70) {
-                // Phase 2: elongate tall (sweat-drop)
-                final p = (t - 0.30) / 0.40;
-                sx = lerpDouble(1.5, 0.50, p)!;
-                sy = lerpDouble(0.60, 2.80, p)!;
-              } else {
-                // Phase 3: taper to point as it dives in
-                final p = (t - 0.70) / 0.30;
-                sx = lerpDouble(0.50, 0.15, p)!;
-                sy = lerpDouble(2.80, 1.00, p)!;
-              }
-      
-              final d = fabRadius * 2;
-              return Positioned(
-                left: cx - fabRadius,
-                top: cy - fabRadius,
-                child: GooeyZone(
-                  color: color,
-                  gooiness: 0,
-                  child: Transform(
-                    alignment: Alignment.center,
-                    transform: Matrix4.identity()..scale(sx, sy),
-                    child: GooeyBlob(
-                      shape: const BlobShape.circle(),
-                      child: Container(
-                        width: d,
-                        height: d,
-                        decoration: BoxDecoration(
-                          color: color,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-      
           // ── Sheet rising from bottom ───────────────────────────────────
           AnimatedBuilder(
             animation: sheetAnim,
@@ -275,7 +208,7 @@ class _GooeySheetTransition extends StatelessWidget {
               final maxH = size.height * heightFactor;
               final currentH = lerpDouble(0, maxH, sheetAnim.value)!;
               if (currentH <= 0) return const SizedBox.shrink();
-      
+
               return Positioned(
                 bottom: 0,
                 left: 0,
@@ -309,19 +242,15 @@ class _GooeySheetTransition extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ROUTE 2 — Gooey Modal
+// ROUTE 2 — Gooey Modal (NO blob — blob is in GooeyFab's GooeyZone)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _GooeyModalRoute<T> extends PageRoute<T> {
   final WidgetBuilder builder;
-  final Offset fabPosition;
-  final double fabRadius;
   final Color color;
 
   _GooeyModalRoute({
     required this.builder,
-    required this.fabPosition,
-    required this.fabRadius,
     required this.color,
   });
 
@@ -334,9 +263,9 @@ class _GooeyModalRoute<T> extends PageRoute<T> {
   @override
   bool get maintainState => true;
   @override
-  Duration get transitionDuration => const Duration(milliseconds: 680);
+  Duration get transitionDuration => const Duration(milliseconds: 750);
   @override
-  Duration get reverseTransitionDuration => const Duration(milliseconds: 380);
+  Duration get reverseTransitionDuration => const Duration(milliseconds: 350);
 
   @override
   Widget buildPage(
@@ -346,9 +275,6 @@ class _GooeyModalRoute<T> extends PageRoute<T> {
   ) {
     return _GooeyModalTransition(
       animation: animation,
-      fabPosition: fabPosition,
-      fabRadius: fabRadius,
-      color: color,
       child: builder(context),
     );
   }
@@ -356,88 +282,33 @@ class _GooeyModalRoute<T> extends PageRoute<T> {
 
 class _GooeyModalTransition extends StatelessWidget {
   final Animation<double> animation;
-  final Offset fabPosition;
-  final double fabRadius;
-  final Color color;
   final Widget child;
 
   const _GooeyModalTransition({
     required this.animation,
-    required this.fabPosition,
-    required this.fabRadius,
-    required this.color,
     required this.child,
   });
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final centerX = size.width / 2;
-    final centerY = size.height / 2;
-
-    // Blob: travels to center and implodes (0 → 0.60)
-    final blobAnim = CurvedAnimation(
-      parent: animation,
-      curve: const Interval(0.0, 0.60, curve: Curves.easeInOutSine),
-    );
-
-    // Dialog: elastic spring-in (0.58 → 1.0) — starts just before blob = 0
+    // Dialog springs in — delayed until the morph blob (580ms in GooeyFab)
+    // has traveled to center and imploded. At 0.55 * 750ms = 413ms, which
+    // is ~493ms after tap (80ms delay + 413ms). Blob is at 493/580 = ~85%
+    // done → nearly imploded. Dialog appears right as blob vanishes.
     final dialogAnim = CurvedAnimation(
       parent: animation,
-      curve: const Interval(0.58, 1.0, curve: Curves.elasticOut),
+      curve: const Interval(0.55, 1.0, curve: Curves.elasticOut),
     );
 
-    // Dialog fade: quick in (0.58 → 0.72)
+    // Dialog fade: quick in as blob finishes imploding
     final dialogFade = CurvedAnimation(
       parent: animation,
-      curve: const Interval(0.58, 0.72, curve: Curves.easeIn),
+      curve: const Interval(0.55, 0.72, curve: Curves.easeIn),
     );
 
     return Stack(
       alignment: Alignment.center,
       children: [
-        // ── Peel blob ─────────────────────────────────────────────────
-        AnimatedBuilder(
-          animation: blobAnim,
-          builder: (_, __) {
-            final t = blobAnim.value;
-            if (t == 0) return const SizedBox.shrink();
-
-            // Position: FAB → screen center
-            final cx = lerpDouble(fabPosition.dx, centerX, t)!;
-            final cy = lerpDouble(fabPosition.dy, centerY, t)!;
-
-            // Scale: grow (0→0.45) then implode (0.45→1.0)
-            final scale = t < 0.45
-                ? lerpDouble(1.0, 1.8, t / 0.45)!
-                : lerpDouble(1.8, 0.0, (t - 0.45) / 0.55)!;
-
-            final d = fabRadius * 2;
-            return Positioned(
-              left: cx - fabRadius,
-              top: cy - fabRadius,
-              child: Transform.scale(
-                scale: scale,
-                child: GooeyZone(
-                  color: color,
-                  gooiness: 0,
-                  child: GooeyBlob(
-                    shape: const BlobShape.circle(),
-                    child: Container(
-                      width: d,
-                      height: d,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
-
         // ── Dialog springs in ─────────────────────────────────────────
         FadeTransition(
           opacity: dialogFade,
@@ -547,7 +418,7 @@ class _GooeyCircularReveal extends StatelessWidget {
 
     return AnimatedBuilder(
       animation: revealAnim,
-      builder: (_, __) {
+      builder: (_, _) {
         final radius = maxRadius * revealAnim.value;
         return Stack(
           children: [

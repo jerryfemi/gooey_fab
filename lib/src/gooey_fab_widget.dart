@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -42,6 +43,9 @@ class GooeyFab extends StatefulWidget {
   /// The gooey blob color. Defaults to [Colors.cyanAccent].
   final Color color;
 
+  /// The icon color shown on the main FAB button.
+  final Color iconColor;
+
   /// FAB circle radius. Defaults to 28 (56px diameter).
   final double radius;
 
@@ -60,16 +64,22 @@ class GooeyFab extends StatefulWidget {
   /// The blob effect. Defaults to [BlobEffect.arc].
   final BlobEffect blobEffect;
 
+  /// Called when the user finishes dragging and the FAB snaps to an edge.
+  /// Use this to persist the position yourself (SharedPreferences, Hive, etc.).
+  final void Function(Offset position)? onPositionChanged;
+
   const GooeyFab({
     super.key,
     required this.items,
     this.color = Colors.cyanAccent,
+    this.iconColor = Colors.black,
     this.radius = 28,
     this.subRadius = 22,
-    this.gooiness = 80,
+    this.gooiness = 65,
     this.initialPosition = const Offset(24, 32),
     this.controller,
     this.blobEffect = BlobEffect.arc,
+    this.onPositionChanged,
   }) : assert(
          items.length >= 1 && items.length <= 5,
          'GooeyFab supports 1–5 items',
@@ -90,6 +100,16 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
   // Edge-snap
   late final AnimationController _snapCtrl;
   late Animation<Offset> _snapAnim;
+  bool _ignoreControllerChange = false;
+
+  // ── Morph blobs (rendered inside this GooeyZone for shared shader) ──────
+  bool _sheetMorphing = false;
+  late final AnimationController _morphSheetCtrl;
+  late final Animation<double> _morphSheetAnim;
+
+  bool _modalMorphing = false;
+  late final AnimationController _morphModalCtrl;
+  late final Animation<double> _morphModalAnim;
 
   @override
   void initState() {
@@ -109,7 +129,50 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
       duration: const Duration(milliseconds: 440),
     );
     _snapCtrl.addListener(() {
-      if (_snapCtrl.isAnimating) setState(() => _pos = _snapAnim.value);
+      if (_snapCtrl.isAnimating && mounted) {
+        setState(() => _pos = _snapAnim.value);
+      }
+    });
+    _snapCtrl.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        widget.onPositionChanged?.call(_pos);
+      }
+    });
+
+    // ── Sheet morph blob ──────────────────────────────────────────────────
+    // Blob travels from FAB down toward bottom edge, morphing through
+    // 3 shape phases (squash → elongate → taper). Because it's inside
+    // the same GooeyZone as the FAB, the shader draws a liquid neck.
+    _morphSheetCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 650),
+    );
+    _morphSheetAnim = CurvedAnimation(
+      parent: _morphSheetCtrl,
+      curve: Curves.easeInCubic,
+    );
+    _morphSheetCtrl.addStatusListener((s) {
+      if (s == AnimationStatus.completed) {
+        if (mounted) setState(() => _sheetMorphing = false);
+        _morphSheetCtrl.reset();
+      }
+    });
+
+    // ── Modal morph blob ─────────────────────────────────────────────────
+    // Blob travels from FAB to screen center, blooms, then implodes.
+    _morphModalCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 580),
+    );
+    _morphModalAnim = CurvedAnimation(
+      parent: _morphModalCtrl,
+      curve: Curves.easeInOutSine,
+    );
+    _morphModalCtrl.addStatusListener((s) {
+      if (s == AnimationStatus.completed) {
+        if (mounted) setState(() => _modalMorphing = false);
+        _morphModalCtrl.reset();
+      }
     });
 
     widget.controller?.addListener(_onControllerChanged);
@@ -129,22 +192,42 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
     widget.controller?.removeListener(_onControllerChanged);
     _menuCtrl.dispose();
     _snapCtrl.dispose();
+    _morphSheetCtrl.dispose();
+    _morphModalCtrl.dispose();
     super.dispose();
   }
 
   void _onControllerChanged() {
+    if (!mounted || _ignoreControllerChange) return;
     final shouldOpen = widget.controller!.isOpen;
     if (shouldOpen && !_menuOpen) _openMenu();
     if (!shouldOpen && _menuOpen) _closeMenu();
   }
 
   void _openMenu() {
+    if (!mounted) return;
     setState(() => _menuOpen = true);
     _menuCtrl.forward();
   }
 
   void _closeMenu() {
-    _menuCtrl.reverse().then((_) => setState(() => _menuOpen = false));
+    _menuCtrl.reverse().then((_) {
+      if (mounted) setState(() => _menuOpen = false);
+    });
+  }
+
+  // ── Morph triggers (called from gooey_transitions.dart via registry) ───
+
+  void _startSheetMorph() {
+    if (_sheetMorphing) return;
+    setState(() => _sheetMorphing = true);
+    _morphSheetCtrl.forward();
+  }
+
+  void _startModalMorph() {
+    if (_modalMorphing) return;
+    setState(() => _modalMorphing = true);
+    _morphModalCtrl.forward();
   }
 
   // ── Drag ──────────────────────────────────────────────────────────────────
@@ -191,14 +274,15 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
       return;
     }
     HapticFeedback.lightImpact();
-    _menuOpen ? _closeMenu() : _openMenu();
-    widget.controller?.isOpen == true ? null : widget.controller?.toggle();
+    final shouldOpen = !_menuOpen;
+    shouldOpen ? _openMenu() : _closeMenu();
+    _setControllerOpen(shouldOpen);
   }
 
   void _onItemTap(GooeyFabItem item) {
     HapticFeedback.mediumImpact();
     _closeMenu();
-    widget.controller?.close();
+    _setControllerOpen(false);
     _registerPosition();
     // Small delay so cluster finishes collapsing before route pushes
     Future.delayed(const Duration(milliseconds: 80), () {
@@ -207,6 +291,8 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
   }
 
   // Tells gooey_transitions.dart where the FAB currently is on screen
+  // and registers the morph callbacks so showSheet/showModal can trigger
+  // blob animations inside this widget's GooeyZone.
   void _registerPosition() {
     final box = context.findRenderObject() as RenderBox?;
     if (box == null) return;
@@ -218,6 +304,8 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
       screenPosition: Offset(screenX, screenY),
       radius: widget.radius.toDouble(),
       color: widget.color,
+      onSheetMorph: _startSheetMorph,
+      onModalMorph: _startModalMorph,
     );
   }
 
@@ -232,6 +320,7 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
     final sr = widget.subRadius;
     final color = widget.color;
     final count = widget.items.length;
+    final fs = r * 2; // full FAB diameter
 
     final fabCenter = Offset(
       size.width - _pos.dx - r,
@@ -248,8 +337,8 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
 
     final spreadScale = _spreadScaleForCount(count);
     final arcDirections = widget.blobEffect == BlobEffect.arc
-      ? _arcDirections(count, _centerAngleForRegion(region))
-      : const <Offset>[];
+        ? _arcDirections(count, _centerAngleForRegion(region))
+        : const <Offset>[];
 
     final stackUp = _stackOpensUp(region);
     final stackDxDir = _stackDxDirection(region);
@@ -260,6 +349,100 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
       child: Stack(
         children: [
           SizedBox(width: size.width, height: size.height),
+
+          // ── MORPH BLOB: sheet (sweat-drop) ────────────────────────────
+          // Same GooeyZone as FAB → shader draws stretching liquid neck.
+          // Starts at FAB, squashes wide then elongates vertically
+          // (surface-tension drop), dives toward the bottom edge.
+          AnimatedBuilder(
+            animation: _morphSheetAnim,
+            builder: (_, _) {
+              if (!_sheetMorphing) return const SizedBox.shrink();
+              final t = _morphSheetAnim.value;
+
+              // Position: FAB → bottom-center
+              final cx = lerpDouble(
+                  _pos.dx, size.width / 2 - fs / 2, t)!;
+              final cy = lerpDouble(_pos.dy, -fs * 0.3, t)!;
+
+              // Shape morph: squash (0→0.35) → elongate (0.35→0.75)
+              //              → taper to point (0.75→1.0)
+              double sx, sy;
+              if (t < 0.35) {
+                final p = t / 0.35;
+                sx = lerpDouble(1.0, 1.45, p)!;
+                sy = lerpDouble(1.0, 0.65, p)!;
+              } else if (t < 0.75) {
+                final p = (t - 0.35) / 0.40;
+                sx = lerpDouble(1.45, 0.55, p)!;
+                sy = lerpDouble(0.65, 2.60, p)!;
+              } else {
+                final p = (t - 0.75) / 0.25;
+                sx = lerpDouble(0.55, 0.20, p)!;
+                sy = lerpDouble(2.60, 0.80, p)!;
+              }
+
+              return Positioned(
+                right: cx,
+                bottom: cy,
+                child: Transform(
+                  alignment: Alignment.center,
+                  transform: Matrix4.identity()..scale(sx, sy),
+                  child: GooeyBlob(
+                    shape: const BlobShape.circle(),
+                    child: Container(
+                      width: fs,
+                      height: fs,
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+
+          // ── MORPH BLOB: modal (peel to center) ────────────────────────
+          // Same GooeyZone as FAB → gooey neck as it peels away.
+          // Races to screen center, blooms outward, then implodes to zero.
+          AnimatedBuilder(
+            animation: _morphModalAnim,
+            builder: (_, _) {
+              if (!_modalMorphing) return const SizedBox.shrink();
+              final t = _morphModalAnim.value;
+
+              final cx = lerpDouble(
+                  _pos.dx, size.width / 2 - fs / 2, t)!;
+              final cy = lerpDouble(
+                  _pos.dy, size.height / 2 - fs / 2, t)!;
+
+              // Scale: grow (0→0.45) then implode (0.45→1.0)
+              final scale = t < 0.45
+                  ? lerpDouble(1.0, 1.8, t / 0.45)!
+                  : lerpDouble(1.8, 0.0, (t - 0.45) / 0.55)!;
+
+              return Positioned(
+                right: cx,
+                bottom: cy,
+                child: Transform.scale(
+                  scale: scale,
+                  child: GooeyBlob(
+                    shape: const BlobShape.circle(),
+                    child: Container(
+                      width: fs,
+                      height: fs,
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
 
           // ── Sub-blobs ────────────────────────────────────────────────
           ...List.generate(count, (i) {
@@ -283,8 +466,9 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
                     break;
                   case BlobEffect.stack:
                     dx = _stackDxBias * stackDxDir * t;
-                    dy =
-                        (i + 1) * _stackSpread * spreadScale * t * (stackUp ? 1 : -1);
+                    final step = _stackSpread * spreadScale;
+                    final offsetFactor = 1 + (i * 0.85);
+                    dy = step * offsetFactor * t * (stackUp ? 1 : -1);
                     break;
                 }
 
@@ -346,8 +530,8 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
                         child: Icon(
                           // Single item: show its icon directly on FAB
                           count == 1 ? widget.items.first.icon : Icons.add,
-                          color: Colors.black,
-                          size: r * 0.75,
+                          color: widget.iconColor,
+                          size: r * 0.82,
                         ),
                       ),
                     ),
@@ -359,6 +543,18 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
         ],
       ),
     );
+  }
+
+  void _setControllerOpen(bool isOpen) {
+    final controller = widget.controller;
+    if (controller == null) return;
+    _ignoreControllerChange = true;
+    if (isOpen) {
+      controller.open();
+    } else {
+      controller.close();
+    }
+    _ignoreControllerChange = false;
   }
 }
 
