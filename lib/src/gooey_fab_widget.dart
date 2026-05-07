@@ -388,7 +388,7 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
                 bottom: cy,
                 child: Transform(
                   alignment: Alignment.center,
-                  transform: Matrix4.identity()..scale(sx, sy),
+                  transform: Matrix4.identity()..scaleByDouble(sx, sy, 1.0, 1.0),
                   child: GooeyBlob(
                     shape: const BlobShape.circle(),
                     child: Container(
