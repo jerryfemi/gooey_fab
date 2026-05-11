@@ -112,6 +112,8 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
   late final AnimationController _morphModalCtrl;
   late final Animation<double> _morphModalAnim;
 
+  Size _layoutSize = Size.zero;
+
   @override
   void initState() {
     super.initState();
@@ -190,6 +192,14 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    // Null out the global registry so a dangling reference can't call into
+    // a disposed widget's context. Covers _getFabScreenPosition and both
+    // morph callbacks, all of which close over this State.
+    registerFabState(
+      getScreenPosition: null,
+      onSheetMorph: null,
+      onModalMorph: null,
+    );
     widget.controller?.removeListener(_onControllerChanged);
     _menuCtrl.dispose();
     _snapCtrl.dispose();
@@ -235,25 +245,23 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
 
   void _onPanUpdate(DragUpdateDetails d) {
     if (_snapCtrl.isAnimating) _snapCtrl.stop();
-    final size = MediaQuery.of(context).size;
-    final pad = MediaQuery.of(context).padding;
+    if (_layoutSize == Size.zero) return;
+
+    final size = _layoutSize;
     final r = widget.radius;
     setState(() {
       _pos = Offset(
         (_pos.dx - d.delta.dx).clamp(8.0, size.width - r * 2 - 8),
-        (_pos.dy - d.delta.dy).clamp(
-          8.0,
-          size.height - r * 2 - 8 - pad.vertical,
-        ),
+        (_pos.dy - d.delta.dy).clamp(8.0, size.height - r * 2 - 8),
       );
     });
-    // Update registry so transitions start from correct position
-    _registerPosition();
   }
 
   void _onPanEnd(DragEndDetails _) {
     HapticFeedback.lightImpact();
-    final size = MediaQuery.of(context).size;
+    if (_layoutSize == Size.zero) return;
+
+    final size = _layoutSize;
     final r = widget.radius;
     final toRight = _pos.dx > size.width / 2 - r;
     final targetX = toRight ? size.width - r * 2 - 20 : 20.0;
@@ -270,7 +278,6 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
     // Single item: go directly to its action (no cluster needed)
     if (widget.items.length == 1) {
       HapticFeedback.mediumImpact();
-      _registerPosition();
       widget.items.first.onTap(context);
       return;
     }
@@ -284,272 +291,263 @@ class _GooeyFabState extends State<GooeyFab> with TickerProviderStateMixin {
     HapticFeedback.mediumImpact();
     _closeMenu();
     _setControllerOpen(false);
-    _registerPosition();
     // Small delay so cluster finishes collapsing before route pushes
     Future.delayed(const Duration(milliseconds: 80), () {
       if (mounted) item.onTap(context);
     });
   }
 
-  // Tells gooey_transitions.dart where the FAB currently is on screen
-  // and registers the morph callbacks so showSheet/showModal can trigger
-  // blob animations inside this widget's GooeyZone.
-  void _registerPosition() {
+  // Returns the FAB's live global screen coordinates.
+  // Called by the transitions registry at animation-start time (pull model).
+  // Safe to call after layout: uses cached _layoutSize for bounds math and
+  // only invokes findRenderObject/localToGlobal at the moment of the call.
+  Offset _getScreenPosition() {
+    if (!mounted) return const Offset(24, 24);
     final box = context.findRenderObject() as RenderBox?;
-    if (box == null) return;
-    final size = MediaQuery.of(context).size;
-    // _pos is distance from bottom-right; convert to top-left screen coords
-    final screenX = size.width - _pos.dx - widget.radius;
-    final screenY = size.height - _pos.dy - widget.radius;
-    registerFabState(
-      screenPosition: Offset(screenX, screenY),
-      radius: widget.radius.toDouble(),
-      color: widget.color,
-      onSheetMorph: _startSheetMorph,
-      onModalMorph: _startModalMorph,
-    );
+    if (box == null || !box.hasSize) return const Offset(24, 24);
+
+    // FAB local center inside this LayoutBuilder's coordinate space
+    final localX = _layoutSize.width - _pos.dx - widget.radius;
+    final localY = _layoutSize.height - _pos.dy - widget.radius;
+
+    // Convert to global screen coordinates for route transition painters
+    return box.localToGlobal(Offset(localX, localY));
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    _registerPosition();
-    final size = MediaQuery.of(context).size;
-    final padding = MediaQuery.of(context).padding;
-    final r = widget.radius;
-    final sr = widget.subRadius;
-    final color = widget.color;
-    final count = widget.items.length;
-    final fs = r * 2; // full FAB diameter
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        _layoutSize = Size(constraints.maxWidth, constraints.maxHeight);
 
-    final fabCenter = Offset(
-      size.width - _pos.dx - r,
-      size.height - _pos.dy - r,
-    );
-    const maxSpread = _arcSpread;
-    final safeMargin = r + sr + maxSpread + 8;
-    final region = _resolveRegion(
-      center: fabCenter,
-      size: size,
-      padding: padding,
-      safeMargin: safeMargin,
-    );
+        // Register pull callback + morph callbacks unconditionally.
+        // registerFabState only assigns 4 variables — essentially free.
+        // The expensive work (localToGlobal) only happens when a transition fires.
+        registerFabState(
+          getScreenPosition: _getScreenPosition,
+          color: widget.color,
+          onSheetMorph: _startSheetMorph,
+          onModalMorph: _startModalMorph,
+        );
 
-    final spreadScale = _spreadScaleForCount(count);
-    final arcDirections = widget.blobEffect == BlobEffect.arc
-        ? _arcDirections(count, _centerAngleForRegion(region))
-        : const <Offset>[];
+        final size = _layoutSize;
+        final padding = MediaQuery.of(context).padding;
+        final r = widget.radius;
+        final sr = widget.subRadius;
+        final color = widget.color;
+        final count = widget.items.length;
+        final fs = r * 2; // full FAB diameter
 
-    final stackUp = _stackOpensUp(region);
-    final stackDxDir = _stackDxDirection(region);
+        final fabCenter = Offset(
+          size.width - _pos.dx - r,
+          size.height - _pos.dy - r,
+        );
+        const maxSpread = _arcSpread;
+        final safeMargin = r + sr + maxSpread + 8;
+        final region = _resolveRegion(
+          center: fabCenter,
+          size: size,
+          padding: padding,
+          safeMargin: safeMargin,
+        );
 
-    return GooeyZone(
-      color: color,
-      gooiness: widget.gooiness,
-      child: Stack(
-        children: [
-          SizedBox(width: size.width, height: size.height),
+        final spreadScale = _spreadScaleForCount(count);
+        final arcDirections = widget.blobEffect == BlobEffect.arc
+            ? _arcDirections(count, _centerAngleForRegion(region))
+            : const <Offset>[];
 
-          // ── MORPH BLOB: sheet (sweat-drop) ────────────────────────────
-          // Same GooeyZone as FAB → shader draws stretching liquid neck.
-          // Starts at FAB, squashes wide then elongates vertically
-          // (surface-tension drop), dives toward the bottom edge.
-          AnimatedBuilder(
-            animation: _morphSheetAnim,
-            builder: (_, _) {
-              if (!_sheetMorphing) return const SizedBox.shrink();
-              final t = _morphSheetAnim.value;
+        final stackUp = _stackOpensUp(region);
+        final stackDxDir = _stackDxDirection(region);
 
-              // Position: FAB → bottom-center
-              final cx = lerpDouble(
-                  _pos.dx, size.width / 2 - fs / 2, t)!;
-              final cy = lerpDouble(_pos.dy, -fs * 0.3, t)!;
+        return GooeyZone(
+          color: color,
+          gooiness: widget.gooiness,
+          child: Stack(
+            children: [
+              SizedBox(width: size.width, height: size.height),
 
-              // Shape morph: squash (0→0.35) → elongate (0.35→0.75)
-              //              → taper to point (0.75→1.0)
-              double sx, sy;
-              if (t < 0.35) {
-                final p = t / 0.35;
-                sx = lerpDouble(1.0, 1.45, p)!;
-                sy = lerpDouble(1.0, 0.65, p)!;
-              } else if (t < 0.75) {
-                final p = (t - 0.35) / 0.40;
-                sx = lerpDouble(1.45, 0.55, p)!;
-                sy = lerpDouble(0.65, 2.60, p)!;
-              } else {
-                final p = (t - 0.75) / 0.25;
-                sx = lerpDouble(0.55, 0.20, p)!;
-                sy = lerpDouble(2.60, 0.80, p)!;
-              }
+              // ── MORPH BLOB: sheet (sweat-drop) ────────────────────────────
+              // Same GooeyZone as FAB → shader draws stretching liquid neck.
+              // Travels toward the bottom edge as a perfect circle.
+              AnimatedBuilder(
+                animation: _morphSheetAnim,
+                builder: (_, _) {
+                  if (!_sheetMorphing) return const SizedBox.shrink();
+                  final t = _morphSheetAnim.value;
 
-              return Positioned(
-                right: cx,
-                bottom: cy,
-                child: Transform(
-                  alignment: Alignment.center,
-                  transform: Matrix4.identity()..scaleByDouble(sx, sy, 1.0, 1.0),
-                  child: GooeyBlob(
-                    shape: const BlobShape.circle(),
-                    child: Container(
-                      width: fs,
-                      height: fs,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
+                  // Position: FAB → bottom-center
+                  final cx = lerpDouble(_pos.dx, size.width / 2 - fs / 2, t)!;
+                  final cy = lerpDouble(_pos.dy, -fs * 0.3, t)!;
+
+                  return Positioned(
+                    right: cx,
+                    bottom: cy,
+                    child: GooeyBlob(
+                      shape: const BlobShape.circle(),
+                      child: Container(
+                        width: fs,
+                        height: fs,
+                        decoration: BoxDecoration(
+                          color: color,
+                          shape: BoxShape.circle,
+                        ),
                       ),
                     ),
-                  ),
-                ),
-              );
-            },
-          ),
+                  );
+                },
+              ),
 
-          // ── MORPH BLOB: modal (peel to center) ────────────────────────
-          // Same GooeyZone as FAB → gooey neck as it peels away.
-          // Races to screen center, blooms outward, then implodes to zero.
-          AnimatedBuilder(
-            animation: _morphModalAnim,
-            builder: (_, _) {
-              if (!_modalMorphing) return const SizedBox.shrink();
-              final t = _morphModalAnim.value;
+              // ── MORPH BLOB: modal (peel to center) ────────────────────────
+              // Same GooeyZone as FAB → gooey neck as it peels away.
+              // Races to screen center, blooms outward, then implodes to zero.
+              AnimatedBuilder(
+                animation: _morphModalAnim,
+                builder: (_, _) {
+                  if (!_modalMorphing) return const SizedBox.shrink();
+                  final t = _morphModalAnim.value;
 
-              final cx = lerpDouble(
-                  _pos.dx, size.width / 2 - fs / 2, t)!;
-              final cy = lerpDouble(
-                  _pos.dy, size.height / 2 - fs / 2, t)!;
+                  final cx = lerpDouble(_pos.dx, size.width / 2 - fs / 2, t)!;
+                  final cy = lerpDouble(_pos.dy, size.height / 2 - fs / 2, t)!;
 
-              // Scale: grow (0→0.45) then implode (0.45→1.0)
-              final scale = t < 0.45
-                  ? lerpDouble(1.0, 1.8, t / 0.45)!
-                  : lerpDouble(1.8, 0.0, (t - 0.45) / 0.55)!;
+                  // Scale: grow (0→0.45) then implode (0.45→1.0)
+                  final scale = t < 0.45
+                      ? lerpDouble(1.0, 1.8, t / 0.45)!
+                      : lerpDouble(1.8, 0.0, (t - 0.45) / 0.55)!;
 
-              return Positioned(
-                right: cx,
-                bottom: cy,
-                child: Transform.scale(
-                  scale: scale,
-                  child: GooeyBlob(
-                    shape: const BlobShape.circle(),
-                    child: Container(
-                      width: fs,
-                      height: fs,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-
-          // ── Sub-blobs ────────────────────────────────────────────────
-          ...List.generate(count, (i) {
-            final item = widget.items[i];
-            final blobColor = item.color ?? color;
-            return AnimatedBuilder(
-              animation: _menuAnim,
-              builder: (_, _) {
-                final t = _menuAnim.value;
-                // When menu is closed, remove sub-blobs entirely so only
-                // the main FAB renders in the GooeyZone → clean, normal size.
-                if (t == 0 && !_menuOpen) return const SizedBox.shrink();
-
-                final iconColor = item.iconColor ??
-                    (ThemeData.estimateBrightnessForColor(blobColor) == Brightness.light
-                        ? Colors.black.withValues(alpha: 0.8)
-                        : Colors.white.withValues(alpha: 0.9));
-
-                double dx = 0;
-                double dy = 0;
-
-                switch (widget.blobEffect) {
-                  case BlobEffect.arc:
-                    final dir = arcDirections[i];
-                    final spread = _arcSpread * spreadScale;
-                    dx = dir.dx * spread * t;
-                    dy = dir.dy * spread * t;
-                    break;
-                  case BlobEffect.stack:
-                    dx = _stackDxBias * stackDxDir * t;
-                    final step = _stackSpread * spreadScale;
-                    final offsetFactor = 1 + (i * 0.85);
-                    dy = step * offsetFactor * t * (stackUp ? 1 : -1);
-                    break;
-                }
-
-                return Positioned(
-                  right: _pos.dx - dx,
-                  bottom: _pos.dy + dy,
-                  child: Tooltip(
-                    message: item.label,
-                    child: GestureDetector(
-                      onTap: () => _onItemTap(item),
+                  return Positioned(
+                    right: cx,
+                    bottom: cy,
+                    child: Transform.scale(
+                      scale: scale,
                       child: GooeyBlob(
                         shape: const BlobShape.circle(),
                         child: Container(
-                          width: sr * 2,
-                          height: sr * 2,
+                          width: fs,
+                          height: fs,
                           decoration: BoxDecoration(
-                            color: blobColor,
+                            color: color,
                             shape: BoxShape.circle,
                           ),
-                          child: Center(
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+
+              // ── Sub-blobs ────────────────────────────────────────────────
+              ...List.generate(count, (i) {
+                final item = widget.items[i];
+                final blobColor = item.color ?? color;
+                return AnimatedBuilder(
+                  animation: _menuAnim,
+                  builder: (_, _) {
+                    final t = _menuAnim.value;
+                    // When menu is closed, remove sub-blobs entirely so only
+                    // the main FAB renders in the GooeyZone → clean, normal size.
+                    if (t == 0 && !_menuOpen) return const SizedBox.shrink();
+
+                    final iconColor =
+                        item.iconColor ??
+                        (ThemeData.estimateBrightnessForColor(blobColor) ==
+                                Brightness.light
+                            ? Colors.black.withValues(alpha: 0.8)
+                            : Colors.white.withValues(alpha: 0.9));
+
+                    double dx = 0;
+                    double dy = 0;
+
+                    switch (widget.blobEffect) {
+                      case BlobEffect.arc:
+                        final dir = arcDirections[i];
+                        final spread = _arcSpread * spreadScale;
+                        dx = dir.dx * spread * t;
+                        dy = dir.dy * spread * t;
+                        break;
+                      case BlobEffect.stack:
+                        dx = _stackDxBias * stackDxDir * t;
+                        final step = _stackSpread * spreadScale;
+                        final offsetFactor = 1 + (i * 0.85);
+                        dy = step * offsetFactor * t * (stackUp ? 1 : -1);
+                        break;
+                    }
+
+                    return Positioned(
+                      right: _pos.dx - dx,
+                      bottom: _pos.dy + dy,
+                      child: Tooltip(
+                        message: item.label,
+                        child: GestureDetector(
+                          onTap: () => _onItemTap(item),
+                          child: GooeyBlob(
+                            shape: const BlobShape.circle(),
+                            child: Container(
+                              width: sr * 2,
+                              height: sr * 2,
+                              decoration: BoxDecoration(
+                                color: blobColor,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Center(
+                                child: Icon(
+                                  item.icon,
+                                  color: iconColor,
+                                  size: sr * 0.8,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                );
+              }),
+
+              // ── Main FAB ─────────────────────────────────────────────────
+              Positioned(
+                right: _pos.dx,
+                bottom: _pos.dy,
+                child: GestureDetector(
+                  onPanUpdate: _onPanUpdate,
+                  onPanEnd: _onPanEnd,
+                  onTap: _onFabTap,
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.grab,
+                    child: GooeyBlob(
+                      shape: const BlobShape.circle(),
+                      child: Container(
+                        width: r * 2,
+                        height: r * 2,
+                        decoration: BoxDecoration(
+                          color: color,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Center(
+                          child: AnimatedRotation(
+                            duration: const Duration(milliseconds: 300),
+                            turns: _menuOpen ? 0.125 : 0,
                             child: Icon(
-                              item.icon,
-                              color: iconColor,
-                              size: sr * 0.8,
+                              // Single item: show its icon directly on FAB
+                              count == 1
+                                  ? widget.items.first.icon
+                                  : CupertinoIcons.add,
+                              color: widget.iconColor,
+                              size: r * 0.9,
                             ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                );
-              },
-            );
-          }),
-
-          // ── Main FAB ─────────────────────────────────────────────────
-          Positioned(
-            right: _pos.dx,
-            bottom: _pos.dy,
-            child: GestureDetector(
-              onPanUpdate: _onPanUpdate,
-              onPanEnd: _onPanEnd,
-              onTap: _onFabTap,
-              child: MouseRegion(
-                cursor: SystemMouseCursors.grab,
-                child: GooeyBlob(
-                  shape: const BlobShape.circle(),
-                  child: Container(
-                    width: r * 2,
-                    height: r * 2,
-                    decoration: BoxDecoration(
-                      color: color,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Center(
-                      child: AnimatedRotation(
-                        duration: const Duration(milliseconds: 300),
-                        turns: _menuOpen ? 0.125 : 0,
-                        child: Icon(
-                          // Single item: show its icon directly on FAB
-                          count == 1 ? widget.items.first.icon : CupertinoIcons.add,
-                          color: widget.iconColor,
-                          size: r * 0.9,
-                        ),
-                      ),
-                    ),
-                  ),
                 ),
               ),
-            ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 

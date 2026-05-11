@@ -27,9 +27,9 @@ Blobs peel apart from the FAB with a **liquid gooey neck**. Tap a blob to trigge
 
 | Transition | Visual Feel | Best For |
 |---|---|---|
-| `showSheet` | Blob squashes → elongates (sweat-drop) → dives into bottom edge. | Menus, quick options, filter sheets |
+| `showSheet` | Blob travels to bottom edge → native-feeling scrollable sheet pops up. | Menus, quick options, filter sheets |
 | `showModal` | Blob races to center, blooms, implodes → dialog springs open. | Alerts, confirmations, mini-forms |
-| `showScreen` | Blob expands as a circle, flooding the screen with ink. | Detail screens, new routes, onboarding |
+| `showScreen` | Blob expands as a circle, flooding the screen with ink. Can be standalone. | Detail screens, new routes, onboarding |
 
 ---
 
@@ -65,7 +65,7 @@ GooeyFabScaffold(
       label: 'Menu',
       onTap: (ctx) => GooeyTransitions.showSheet(
         ctx,
-        builder: (_) => MySheet(),
+        builder: (_, scrollController) => MySheet(controller: scrollController),
       ),
     ),
     GooeyFabItem(
@@ -121,6 +121,28 @@ GooeyFab(
 )
 ```
 
+### Standalone transitions (No FAB needed)
+
+You can trigger the `showScreen` ink-flood animation from any point on the screen (e.g., a standard button).
+
+```dart
+ElevatedButton(
+  onPressed: () {
+    // Get the center of the button
+    final box = context.findRenderObject() as RenderBox;
+    final center = box.localToGlobal(box.size.center(Offset.zero));
+
+    GooeyTransitions.showScreen(
+      context,
+      origin: center, // Transition starts here
+      builder: (_) => MyDetailsPage(),
+    );
+  },
+  child: Text("Splash from here!"),
+)
+```
+```
+
 ### Programmatic control
 
 ```dart
@@ -165,12 +187,17 @@ GooeyFab(
 The morph animation is owned by `gooey_fab` — your widget just fills the space.
 
 ```dart
-// showSheet — builder receives BuildContext
+// showSheet — builder receives ScrollController for native scrolling
 GooeyTransitions.showSheet(
   context,
-  builder: (ctx) => MyCompletelyCustomSheet(),
-  heightFactor: 0.65,            // how tall the sheet is (default 0.50)
-  backgroundColor: Colors.white, // sheet background
+  initialChildSize: 0.65,        // how tall the sheet starts
+  maxChildSize: 1.0,             // how far it can be pulled up
+  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+  clipBehavior: Clip.antiAlias,  // smooth corners (heavier on GPU)
+  backgroundColor: Colors.white, 
+  builder: (ctx, scrollController) => MyScrollableSheet(
+    controller: scrollController,
+  ),
 );
 
 // showModal — any widget, not just AlertDialog
