@@ -1,5 +1,3 @@
-import 'dart:ui' show lerpDouble;
-
 import 'package:flutter/material.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -10,8 +8,9 @@ import 'package:flutter/material.dart';
 // from — regardless of where the user has dragged the FAB.
 // ─────────────────────────────────────────────────────────────────────────────
 
-Offset _fabScreenPosition = const Offset(24, 24);
-double _fabRadius = 28;
+// Pull-based: instead of storing a stale Offset, we store a callback.
+// The transition calls it at animation-start time to pull the live coords.
+Offset Function()? _getFabScreenPosition;
 Color _fabColor = Colors.cyanAccent;
 
 // Morph callbacks — called by showSheet / showModal to trigger the blob
@@ -19,17 +18,15 @@ Color _fabColor = Colors.cyanAccent;
 VoidCallback? _triggerSheetMorph;
 VoidCallback? _triggerModalMorph;
 
-/// Called by [GooeyFab] every time it rebuilds. Internal use only.
+/// Called by [GooeyFab] on every rebuild and on dispose. Internal use only.
 void registerFabState({
-  required Offset screenPosition,
-  required double radius,
-  required Color color,
+  Offset Function()? getScreenPosition,
+  Color? color,
   VoidCallback? onSheetMorph,
   VoidCallback? onModalMorph,
 }) {
-  _fabScreenPosition = screenPosition;
-  _fabRadius = radius;
-  _fabColor = color;
+  _getFabScreenPosition = getScreenPosition;
+  if (color != null) _fabColor = color;
   _triggerSheetMorph = onSheetMorph;
   _triggerModalMorph = onModalMorph;
 }
@@ -54,10 +51,13 @@ abstract class GooeyTransitions {
 
   static Future<T?> showSheet<T>(
     BuildContext context, {
-    required WidgetBuilder builder,
+    required ScrollableWidgetBuilder builder,
     Color? color,
-    double heightFactor = 0.50,
+    double initialChildSize = 0.50,
+    double maxChildSize = 1.0,
     Color backgroundColor = const Color(0xFF181818),
+    BorderRadius? borderRadius,
+    Clip clipBehavior = Clip.none,
   }) {
     // Trigger morph blob inside GooeyFab's GooeyZone
     _triggerSheetMorph?.call();
@@ -67,8 +67,11 @@ abstract class GooeyTransitions {
       _GooeySheetRoute<T>(
         builder: builder,
         color: effectiveColor,
-        heightFactor: heightFactor,
+        initialChildSize: initialChildSize,
+        maxChildSize: maxChildSize,
         backgroundColor: backgroundColor,
+        borderRadius: borderRadius,
+        clipBehavior: clipBehavior,
       ),
     );
   }
@@ -87,12 +90,9 @@ abstract class GooeyTransitions {
     _triggerModalMorph?.call();
 
     final effectiveColor = color ?? _fabColor;
-    return Navigator.of(context).push<T>(
-      _GooeyModalRoute<T>(
-        builder: builder,
-        color: effectiveColor,
-      ),
-    );
+    return Navigator.of(
+      context,
+    ).push<T>(_GooeyModalRoute<T>(builder: builder, color: effectiveColor));
   }
 
   // ── 3. Full screen ─────────────────────────────────────────────────────────
@@ -105,13 +105,13 @@ abstract class GooeyTransitions {
     BuildContext context, {
     required WidgetBuilder builder,
     Color? color,
+    Offset? origin,
   }) {
     final effectiveColor = color ?? _fabColor;
     return Navigator.of(context).push<T>(
       _GooeyScreenRoute<T>(
         builder: builder,
-        fabPosition: _fabScreenPosition,
-        fabRadius: _fabRadius,
+        fabPosition: origin ?? _getFabScreenPosition?.call() ?? const Offset(24, 24),
         color: effectiveColor,
       ),
     );
@@ -123,16 +123,22 @@ abstract class GooeyTransitions {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _GooeySheetRoute<T> extends PageRoute<T> {
-  final WidgetBuilder builder;
+  final ScrollableWidgetBuilder builder;
   final Color color;
-  final double heightFactor;
+  final double initialChildSize;
+  final double maxChildSize;
   final Color backgroundColor;
+  final BorderRadius? borderRadius;
+  final Clip clipBehavior;
 
   _GooeySheetRoute({
     required this.builder,
     required this.color,
-    required this.heightFactor,
+    required this.initialChildSize,
+    required this.maxChildSize,
     required this.backgroundColor,
+    this.borderRadius,
+    this.clipBehavior = Clip.none,
   });
 
   @override
@@ -158,37 +164,43 @@ class _GooeySheetRoute<T> extends PageRoute<T> {
   ) {
     return _GooeySheetTransition(
       animation: animation,
-      heightFactor: heightFactor,
+      initialChildSize: initialChildSize,
+      maxChildSize: maxChildSize,
       backgroundColor: backgroundColor,
-      child: builder(context),
+      borderRadius: borderRadius,
+      clipBehavior: clipBehavior,
+      builder: builder,
     );
   }
 }
 
 class _GooeySheetTransition extends StatelessWidget {
   final Animation<double> animation;
-  final double heightFactor;
+  final double initialChildSize;
+  final double maxChildSize;
   final Color backgroundColor;
-  final Widget child;
+  final BorderRadius? borderRadius;
+  final Clip clipBehavior;
+  final ScrollableWidgetBuilder builder;
 
   const _GooeySheetTransition({
     required this.animation,
-    required this.heightFactor,
+    required this.initialChildSize,
+    required this.maxChildSize,
     required this.backgroundColor,
-    required this.child,
+    this.borderRadius,
+    this.clipBehavior = Clip.none,
+    required this.builder,
   });
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-
     // Sheet slides up — delayed just enough for the morph blob (500ms in
-    // GooeyFab) to peel off and begin traveling. At 0.28 * 700ms = 196ms,
-    // which is ~276ms after tap. The blob is ~55% traveled → sheet rises
-    // as blob arrives at the bottom edge.
+    // GooeyFab) to peel off and begin traveling. At 0.14 * 700ms = 98ms,
+    // so the sheet starts rising very quickly as the blob travels down.
     final sheetAnim = CurvedAnimation(
       parent: animation,
-      curve: const Interval(0.28, 1.0, curve: Curves.easeOutCubic),
+      curve: const Interval(0.14, 1.0, curve: Curves.easeOutCubic),
     );
 
     // Content fade: visible once sheet is mostly risen
@@ -199,43 +211,48 @@ class _GooeySheetTransition extends StatelessWidget {
 
     return Material(
       type: MaterialType.transparency,
-      child: Stack(
-        children: [
-          // ── Sheet rising from bottom ───────────────────────────────────
-          AnimatedBuilder(
-            animation: sheetAnim,
-            builder: (_, _) {
-              final maxH = size.height * heightFactor;
-              final currentH = lerpDouble(0, maxH, sheetAnim.value)!;
-              if (currentH <= 0) return const SizedBox.shrink();
-
-              return Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: Container(
-                  height: currentH,
-                  decoration: BoxDecoration(
-                    color: backgroundColor,
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(28),
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 1),
+          end: Offset.zero,
+        ).animate(sheetAnim),
+        child: NotificationListener<DraggableScrollableNotification>(
+          onNotification: (notification) {
+            // Dismiss the route if the user drags it all the way down
+            if (notification.extent <= 0.05) {
+              Navigator.of(context).maybePop();
+            }
+            return false;
+          },
+          child: DraggableScrollableSheet(
+            initialChildSize: initialChildSize,
+            minChildSize: 0.0,
+            maxChildSize: maxChildSize,
+            snap: true,
+            snapSizes: [initialChildSize],
+            builder: (context, scrollController) {
+              return Container(
+                decoration: BoxDecoration(
+                  color: backgroundColor,
+                  borderRadius: borderRadius,
+                  border: Border.all(color: Colors.white10),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.4),
+                      blurRadius: 32,
+                      offset: const Offset(0, -8),
                     ),
-                    border: Border.all(color: Colors.white10),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.4),
-                        blurRadius: 32,
-                        offset: const Offset(0, -8),
-                      ),
-                    ],
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: FadeTransition(opacity: contentAnim, child: child),
+                  ],
+                ),
+                clipBehavior: clipBehavior,
+                child: FadeTransition(
+                  opacity: contentAnim,
+                  child: builder(context, scrollController),
                 ),
               );
             },
           ),
-        ],
+        ),
       ),
     );
   }
@@ -249,15 +266,14 @@ class _GooeyModalRoute<T> extends PageRoute<T> {
   final WidgetBuilder builder;
   final Color color;
 
-  _GooeyModalRoute({
-    required this.builder,
-    required this.color,
-  });
+  _GooeyModalRoute({required this.builder, required this.color});
 
   @override
   Color? get barrierColor => Colors.black54;
   @override
   String? get barrierLabel => 'Modal';
+  @override
+  bool get barrierDismissible => true;
   @override
   bool get opaque => false;
   @override
@@ -273,10 +289,7 @@ class _GooeyModalRoute<T> extends PageRoute<T> {
     Animation<double> animation,
     Animation<double> secondaryAnimation,
   ) {
-    return _GooeyModalTransition(
-      animation: animation,
-      child: builder(context),
-    );
+    return _GooeyModalTransition(animation: animation, child: builder(context));
   }
 }
 
@@ -284,10 +297,7 @@ class _GooeyModalTransition extends StatelessWidget {
   final Animation<double> animation;
   final Widget child;
 
-  const _GooeyModalTransition({
-    required this.animation,
-    required this.child,
-  });
+  const _GooeyModalTransition({required this.animation, required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -326,13 +336,11 @@ class _GooeyModalTransition extends StatelessWidget {
 class _GooeyScreenRoute<T> extends PageRoute<T> {
   final WidgetBuilder builder;
   final Offset fabPosition;
-  final double fabRadius;
   final Color color;
 
   _GooeyScreenRoute({
     required this.builder,
     required this.fabPosition,
-    required this.fabRadius,
     required this.color,
   });
 
